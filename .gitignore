@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Virtual environment
+.venv/
+
+# Starter code zips (re-downloadable)
+*.zip
+
+# Model checkpoints / outputs (regenerable, potentially large)
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Datasets
+data/
+datasets/
+*.tar
+*.tar.gz
+*.tgz
+
+# OS
+.DS_Store
+Thumbs.db
