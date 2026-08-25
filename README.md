@@ -3,7 +3,7 @@
 自学课程：[Deep Learning for Computer Vision](https://web.eecs.umich.edu/~justincj/teaching/eecs498/WI2022/schedule.html)
 （University of Michigan · Winter 2022 · Justin Johnson）
 
-本仓库用于存放课程编程作业的解答。
+本仓库用于存放课程编程作业的个人解答。
 
 ## 课程作业
 
