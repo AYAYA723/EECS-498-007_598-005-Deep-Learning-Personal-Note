@@ -10,6 +10,9 @@ __pycache__/
 # Downloaded wheels
 .wheels/
 
+# Lecture slides (local reference material, not assignment code)
+slides/
+
 # Starter code zips (re-downloadable)
 *.zip
 
@@ -22,9 +25,13 @@ __pycache__/
 # Datasets
 data/
 datasets/
+assignment1/cifar-10-batches-py/
 *.tar
 *.tar.gz
 *.tgz
+
+# Local download helpers
+/download_slides.sh
 
 # OS
 .DS_Store
