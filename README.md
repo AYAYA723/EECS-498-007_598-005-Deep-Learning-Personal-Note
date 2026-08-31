@@ -27,15 +27,3 @@
 
 - Python 3.14
 - PyTorch 2.13（CUDA 13 · NVIDIA RTX 5070）
-
-```bash
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-.venv/Scripts/python.exe -m pip install jupyter matplotlib pillow scipy numpy tqdm ipykernel
-```
-
-启动 notebook：
-
-```bash
-.venv/Scripts/jupyter.exe notebook
-```
