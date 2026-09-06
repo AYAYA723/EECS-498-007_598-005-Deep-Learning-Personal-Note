@@ -25,7 +25,7 @@ slides/
 # Datasets
 data/
 datasets/
-assignment1/cifar-10-batches-py/
+cifar-10-batches-py/
 *.tar
 *.tar.gz
 *.tgz
