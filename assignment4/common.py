@@ -84,7 +84,16 @@ class DetectorBackboneWithFPN(nn.Module):
         self.fpn_params = nn.ModuleDict()
 
         # Replace "pass" statement with your code
-        pass
+        for level_name, feature_shape in dummy_out_shapes:
+            level = level_name[-1]          # "c3" -> "3"
+            in_channels = feature_shape[1]  # shape: (B, C, H, W)
+
+            self.fpn_params[f"lateral{level}"] = nn.Conv2d(
+            in_channels, out_channels, kernel_size=1, stride=1, padding=0
+            )
+            self.fpn_params[f"output{level}"] = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1
+            )
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -111,7 +120,26 @@ class DetectorBackboneWithFPN(nn.Module):
         ######################################################################
 
         # Replace "pass" statement with your code
-        pass
+        c3 = backbone_feats["c3"]
+        c4 = backbone_feats["c4"]
+        c5 = backbone_feats["c5"]
+
+        p5_inner = self.fpn_params["lateral5"](c5)
+        p5 = self.fpn_params["output5"](p5_inner)
+
+        p4_inner = self.fpn_params["lateral4"](c4)
+        p5_up = F.interpolate(p5_inner, size=c4.shape[-2:], mode="nearest")
+        p4_inner += p5_up
+        p4 = self.fpn_params["output4"](p4_inner)
+
+        p3_inner = self.fpn_params["lateral3"](c3)
+        p4_up = F.interpolate(p4_inner, size=c3.shape[-2:], mode="nearest")
+        p3_inner += p4_up
+        p3 = self.fpn_params["output3"](p3_inner)
+
+        fpn_feats["p3"] = p3
+        fpn_feats["p4"] = p4
+        fpn_feats["p5"] = p5
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -157,7 +185,13 @@ def get_fpn_location_coords(
         # TODO: Implement logic to get location co-ordinates below.          #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        _, _, H, W = feat_shape
+        ys = (torch.arange(H, dtype=dtype, device=device) + 0.5) * level_stride
+        xs = (torch.arange(W, dtype=dtype, device=device) + 0.5) * level_stride
+        grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+        location_coords[level_name] = torch.stack(
+            (grid_x, grid_y), dim=-1
+        ).reshape(-1, 2)
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -181,7 +215,7 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     """
 
     if (not boxes.numel()) or (not scores.numel()):
-        return torch.zeros(0, dtype=torch.long)
+        return torch.zeros(0, dtype=torch.long, device=boxes.device)
 
     keep = None
     #############################################################################
@@ -196,7 +230,30 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    order = scores.argsort(descending=True)
+    kept = []
+
+    while order.numel() > 0:
+        i = order[0]
+        kept.append(i)
+        rest = order[1:]
+        if rest.numel() == 0:
+            break
+
+        left = torch.maximum(boxes[i, 0], boxes[rest, 0])
+        top = torch.maximum(boxes[i, 1], boxes[rest, 1])
+        right = torch.minimum(boxes[i, 2], boxes[rest, 2])
+        bottom = torch.minimum(boxes[i, 3], boxes[rest, 3])
+        intersection = (right - left).clamp(min=0) * (bottom - top).clamp(min=0)
+
+        area_i = (boxes[i, 2] - boxes[i, 0]) * (boxes[i, 3] - boxes[i, 1])
+        area_rest = (boxes[rest, 2] - boxes[rest, 0]) * (boxes[rest, 3] - boxes[rest, 1])
+        union = area_i + area_rest - intersection
+        iou = intersection / union.clamp(min=1e-12)
+
+        order = rest[iou <= iou_threshold]
+
+    keep = torch.stack(kept)
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################
