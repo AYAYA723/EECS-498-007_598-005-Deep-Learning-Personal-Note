@@ -669,7 +669,35 @@ class RPN(nn.Module):
             # Feel free to delete this line: (but keep variable names same)
             loss_obj, loss_box = None, None
             # Replace "pass" statement with your code
+            num_samples = self.batch_size_per_image * num_images
+            fg_idx, bg_idx = sample_rpn_training(
+                matched_gt_boxes, num_samples, fg_fraction=0.5
+            )
 
+            sample_idx = torch.cat((fg_idx, bg_idx))
+            obj_logits = pred_obj_logits[sample_idx]
+            obj_targets = torch.cat((
+                torch.ones_like(pred_obj_logits[fg_idx]),
+                torch.zeros_like(pred_obj_logits[bg_idx]),
+            ))
+
+            fg_anchors = anchor_boxes[fg_idx]
+            fg_gt_boxes = matched_gt_boxes[fg_idx, :4]
+            fg_pred_deltas = pred_boxreg_deltas[fg_idx]
+            fg_gt_deltas = rcnn_get_deltas_from_anchors(
+                fg_anchors, fg_gt_boxes
+            )
+
+            loss_obj = F.binary_cross_entropy_with_logits(
+                obj_logits,
+                obj_targets,
+                reduction="none"
+            )
+            loss_box = F.l1_loss(
+                fg_pred_deltas,
+                fg_gt_deltas,
+                reduction="none"
+            )
             ##################################################################
             #                         END OF YOUR CODE                       #
             ##################################################################
@@ -737,7 +765,27 @@ class RPN(nn.Module):
                 # different shapes, you need to make some intermediate views.
                 ##############################################################
                 # Replace "pass" statement with your code
-                pass
+                proposal_boxes = rcnn_apply_deltas_to_anchors(
+                    level_boxreg_deltas[_batch_idx].clone(),
+                    level_anchors
+                ) # (HWA, 4)
+                image_width, image_height = image_size
+                proposal_boxes[:, 0::2].clamp_(0, image_width)
+                proposal_boxes[:, 1::2].clamp_(0, image_height)
+
+                scores = level_obj_logits[_batch_idx]  # (HWA, )
+                k = min(self.pre_nms_topk, scores.numel())
+                top_scores, top_idx = torch.topk(scores, k=k)
+                top_boxes = proposal_boxes[top_idx]
+
+                nms_indices = torchvision.ops.nms(
+                    top_boxes,
+                    top_scores,
+                    self.nms_thresh
+                )
+                keep = nms_indices[:self.post_nms_topk]
+                level_proposals_per_image.append(top_boxes[keep])
+
                 ##############################################################
                 #                        END OF YOUR CODE                    #
                 ##############################################################
