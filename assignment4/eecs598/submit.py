@@ -30,22 +30,13 @@ _A3_FILES = [
 ]
 
 _A4_FILES = [
-    'network_visualization.py',
-    'network_visualization.ipynb',
-    'style_transfer.py',
-    'style_transfer.ipynb',
-    'pytorch_autograd_and_nn.py',
-    'pytorch_autograd_and_nn.ipynb',
-    'rnn_lstm_attention_captioning.py',
-    'rnn_lstm_attention_captioning.ipynb',
-    # result files
-    'pytorch_autograd_and_nn.pkl',
-    'rnn_lstm_attention_submission.pkl',
-    'saliency_maps_results.jpg',
-    'adversarial_attacks_results.jpg',
-    'class_viz_result.jpg',
-    'style_transfer_result.jpg',
-    'feature_inversion_result.jpg'
+    'common.py',
+    'one_stage_detector.py',
+    'two_stage_detector.py',
+    'one_stage_detector.ipynb',
+    'two_stage_detector.ipynb',
+    'fcos_detector.pt',
+    'rcnn_detector.pt',
 ]
 
 _A5_FILES = [
