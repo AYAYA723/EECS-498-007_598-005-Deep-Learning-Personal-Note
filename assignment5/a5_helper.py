@@ -19,7 +19,7 @@ def load_coco_captions(path: str = "./datasets/coco.pt"):
 
     Returns: a data dictionary
   """
-    data_dict = torch.load(path)
+    data_dict = torch.load(path, map_location="cpu")
     # print out all the keys and values from the data dictionary
     for k, v in data_dict.items():
         if type(v) == torch.Tensor:
