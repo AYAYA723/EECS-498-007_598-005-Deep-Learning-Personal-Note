@@ -184,6 +184,8 @@ def attention_visualizer(img, attn_weights, token):
     img_copy = img.float().div(255.0).permute(1, 2, 0).numpy()[:, :, ::-1].copy()
     masked_img = cv2.addWeighted(attn_weights, 0.5, img_copy, 0.5, 0)
     img_copy = np.concatenate((np.zeros((25, W, 3)), masked_img), axis=0)
+    # OpenCV's text drawing requires an 8-bit image.
+    img_copy = (np.clip(img_copy, 0, 1) * 255).astype(np.uint8)
 
     # Add text
     cv2.putText(

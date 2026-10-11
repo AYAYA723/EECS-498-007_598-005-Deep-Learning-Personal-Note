@@ -463,7 +463,12 @@ class CaptioningRNN(nn.Module):
             pretrained=image_encoder_pretrained
         )
         self.word_embed = WordEmbedding(vocab_size, wordvec_dim)
-        self.rnn = RNN(wordvec_dim, hidden_dim)
+        if self.cell_type == "rnn":
+            self.rnn = RNN(wordvec_dim, hidden_dim)
+        elif self.cell_type == "lstm":
+            self.rnn = LSTM(wordvec_dim, hidden_dim)
+        else:
+            self.rnn = AttentionLSTM(wordvec_dim, hidden_dim)
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -515,12 +520,21 @@ class CaptioningRNN(nn.Module):
         ######################################################################
         # Replace "pass" statement with your code
         features = self.image_encoder(images) # (N, 400, 4, 4)
-        pooled = features.mean(dim=(2, 3)) # (N, 400)
-        h0 = self.feat_proj(pooled) # (N, H)
-
         word_vectors = self.word_embed(captions_in) # (N, T, W)
 
-        h = self.rnn.forward(word_vectors, h0) # (N, T, H)
+        if self.cell_type == "rnn":
+            pooled = features.mean(dim=(2, 3)) # (N, 400)
+            h0 = self.feat_proj(pooled) # (N, H)
+            h = self.rnn.forward(word_vectors, h0) # (N, T, H)
+        elif self.cell_type == "lstm":
+            pooled = features.mean(dim=(2, 3)) # (N, 400)
+            h0 = self.feat_proj(pooled) # (N, H)
+            h = self.rnn.forward(word_vectors, h0) # (N, T, H)
+        else:
+            A = features.permute(0, 2, 3, 1)  # (N, 4, 4, 400)
+            A = self.feat_proj(A) # (N, 4, 4, H)
+            A = A.permute(0, 3, 1, 2) # (N, H, 4, 4)
+            h = self.rnn.forward(word_vectors, A) # (N, T, H)
 
         logits = self.out_proj(h) # (N, T, V)
 
@@ -587,8 +601,45 @@ class CaptioningRNN(nn.Module):
         #######################################################################
         # Replace "pass" statement with your code
         features = self.image_encoder(images) # (N, 400, 4, 4)
-        pooled = features.mean(dim=(2, 3)) # (N, 400)
-        h0 = self.feat_proj(pooled) # (N, H)
+        if self.cell_type == "rnn":
+            pooled = features.mean(dim=(2, 3)) # (N, 400)
+            prev_h = self.feat_proj(pooled) # (N, H)
+        elif self.cell_type == "lstm":
+            pooled = features.mean(dim=(2, 3)) # (N, 400)
+            prev_h = self.feat_proj(pooled) # (N, H)
+            prev_c = torch.zeros_like(prev_h) # (N, H)
+        else:
+            A = features.permute(0, 2, 3, 1) # (N, 4, 4, 400)
+            A = self.feat_proj(A) # (N, 4, 4, H)
+            A = A.permute(0, 3, 1, 2) # (N, H, 4, 4)
+            prev_h = A.mean(dim=(2, 3)) # (N, H)
+            prev_c = prev_h # (N, H)
+
+        current_word = torch.full(
+            (N,), self._start,
+            dtype=torch.long,
+            device=images.device,
+        )  # (N,)
+        for t in range(max_length):
+            word_vector = self.word_embed(current_word)
+            if self.cell_type == "rnn":
+                next_h = self.rnn.step_forward(word_vector, prev_h)
+            elif self.cell_type == "lstm":
+                next_h, next_c = self.rnn.step_forward(word_vector, prev_h, prev_c)
+                prev_c = next_c # (N, H)
+            else:
+                attn, attn_weights = dot_product_attention(prev_h, A)
+                attn_weights_all[:, t, :, :] = attn_weights # (N, 4, 4)
+                next_h, next_c = self.rnn.step_forward(word_vector, prev_h, prev_c, attn)
+                prev_c = next_c # (N, H)
+
+            logits = self.out_proj(next_h)
+            next_word = torch.argmax(logits, dim=1)
+
+            captions[:, t] = next_word
+
+            prev_h = next_h
+            current_word = next_word
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -649,7 +700,17 @@ class LSTM(nn.Module):
         ######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        N, H = prev_h.shape
+        z = x @ self.Wx + prev_h @ self.Wh + self.b # (N, 4H)
+        z = z.reshape(N, 4, H) # (N, 4, H)
+
+        i = torch.sigmoid(z[:, 0, :])
+        f = torch.sigmoid(z[:, 1, :])
+        o = torch.sigmoid(z[:, 2, :])
+        g = torch.tanh(z[:, 3, :])
+
+        next_c = f * prev_c + i * g
+        next_h = o * torch.tanh(next_c)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -683,7 +744,16 @@ class LSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        hn = []
+        N, T, D = x.shape
+        prev_h = h0
+        prev_c = c0
+        for t in range(T):
+            next_h, next_c = self.step_forward(x[:, t, :], prev_h, prev_c)
+            hn.append(next_h)
+            prev_h = next_h
+            prev_c = next_c
+        hn = torch.stack(hn, dim=1) # T * (N, H) → (N, T, H)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -714,7 +784,15 @@ def dot_product_attention(prev_h, A):
     # functions. HINT: Make sure you reshape attn_weights back to (N, 4, 4)! #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    A_flat = A.reshape(N, H, 16) # (N, H, 16)
+    query = prev_h.unsqueeze(1) # (N, 1, H)
+
+    scores = torch.bmm(query, A_flat) / (H ** 0.5) # (N, 1, 16)
+    weights = torch.softmax(scores, dim=2)
+    attn_weights = weights.reshape(N, 4, 4) # (N, 4, 4)
+
+    attn = torch.bmm(A_flat, weights.transpose(1, 2)) # (N, H, 1)
+    attn = attn.squeeze(2) # (N, H)
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################
@@ -778,7 +856,17 @@ class AttentionLSTM(nn.Module):
         #######################################################################
         next_h, next_c = None, None
         # Replace "pass" statement with your code
-        pass
+        N, H = prev_h.shape
+        z = x @ self.Wx + prev_h @ self.Wh + attn @ self.Wattn + self.b # (N, 4H)
+        z = z.reshape(N, 4, H)
+
+        i = torch.sigmoid(z[:, 0, :])
+        f = torch.sigmoid(z[:, 1, :])
+        o = torch.sigmoid(z[:, 2, :])
+        g = torch.tanh(z[:, 3, :])
+
+        next_c = f * prev_c + i * g
+        next_h = o * torch.tanh(next_c)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -821,7 +909,17 @@ class AttentionLSTM(nn.Module):
         ######################################################################
         hn = None
         # Replace "pass" statement with your code
-        pass
+        hn = []
+        N, T, D = x.shape
+        prev_h = h0
+        prev_c = c0
+        for t in range(T):
+            attn, attn_weights = dot_product_attention(prev_h, A)
+            next_h, next_c = self.step_forward(x[:, t, :], prev_h, prev_c, attn)
+            hn.append(next_h)
+            prev_h = next_h
+            prev_c = next_c
+        hn = torch.stack(hn, dim=1)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
