@@ -33,7 +33,8 @@ def generate_token_dict(vocab):
     # elements in between as consequetive number.                                #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    for i in range(len(vocab)):
+        token_dict[vocab[i]] = i
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -74,7 +75,12 @@ def prepocess_input_sequence(
     # appropriate value for the complete token.
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    for word in input_str.split():
+        if word in spc_tokens:
+            out.append(token_dict[word])
+        else:
+            for digit in word:
+                out.append(token_dict[digit])
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -116,7 +122,14 @@ def scaled_dot_product_two_loop_single(
     # using weighted sum becomes an output to the Kth query vector                #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    K, M = query.shape
+    scores = torch.zeros((K, K), dtype=query.dtype, device=query.device) # (K, K)
+    out = torch.zeros_like(value) # (K, M)
+    for i in range(K):
+        for j in range(K):
+            scores[i][j] = (query[i] @ key[j]) / (M ** 0.5)
+        A = torch.softmax(scores[i], dim=0) # (K,)
+        out[i] = A @ value # (K,) @ (K, M) -> (M,)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -163,7 +176,14 @@ def scaled_dot_product_two_loop_batch(
     # Hint: look at torch.bmm                                                     #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    scores = torch.zeros((N, K, K), dtype=query.dtype, device=query.device)
+    out = torch.zeros_like(value)  # (N, K, M)
+
+    for i in range(K):
+        for j in range(K):
+            scores[:, i, j] = (query[:, i, :] * key[:, j, :]).sum(dim=1) / (M ** 0.5) # (N, )
+        A = torch.softmax(scores[:, i, :], dim=1) # (N, K)
+        out[:, i, ] = torch.bmm(A.unsqueeze(1), value).squeeze(1)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -218,16 +238,17 @@ def scaled_dot_product_no_loop_batch(
     # Hint: look at torch.bmm and torch.masked_fill                               #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    scores = torch.bmm(query, key.permute(0, 2, 1)) / (M ** 0.5) # (N, K, K)
     if mask is not None:
         ##########################################################################
         # TODO: Apply the mask to the weight matrix by assigning -1e9 to the     #
         # positions where the mask value is True, otherwise keep it as it is.    #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        scores[mask] = -1e9
     # Replace "pass" statement with your code
-    pass
+    weights_softmax = torch.softmax(scores, dim=2) # (N, K, K)
+    y = weights_softmax @ value # (N, K, dim_v)
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -268,7 +289,16 @@ class SelfAttention(nn.Module):
         # as given above. self.q, self.k, and self.v respectively.               #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        c1 = (6 / (dim_in + dim_q)) ** 0.5
+        c2 = (6 / (dim_in + dim_v)) ** 0.5
+        self.q = nn.Linear(dim_in, dim_q)
+        nn.init.uniform_(self.q.weight, -c1, c1)
+
+        self.k = nn.Linear(dim_in, dim_q)
+        nn.init.uniform_(self.k.weight, -c1, c1)
+
+        self.v = nn.Linear(dim_in, dim_v)
+        nn.init.uniform_(self.v.weight, -c2, c2)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -303,7 +333,13 @@ class SelfAttention(nn.Module):
         # variable self.weights_softmax                                          #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        Q = self.q(query) # (N, K, dim_q)
+        K = self.k(key) # (N, K, dim_q)
+        V = self.v(value) # (N, K, dim_v)
+
+        y, self.weights_softmax = scaled_dot_product_no_loop_batch(
+            Q, K, V, mask
+        ) # (N, K, dim_v), (N, K, K)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -354,7 +390,14 @@ class MultiHeadAttention(nn.Module):
         # SelfAttention.                                                         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.heads = nn.ModuleList()
+        for i in range(num_heads):
+            head = SelfAttention(dim_in, dim_out, dim_out)
+            self.heads.append(head)
+
+        self.proj_down = nn.Linear(num_heads * dim_out, dim_in)
+        c = (6 / (num_heads * dim_out + dim_in)) ** 0.5
+        nn.init.uniform_(self.proj_down.weight, -c, c)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -398,7 +441,13 @@ class MultiHeadAttention(nn.Module):
         # nn.Linear mapping function defined in the initialization step.         #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        outputs = []
+
+        for i in range(len(self.heads)):
+            out = self.heads[i](query, key, value, mask)
+            outputs.append(out) # (N, K, dim_out)
+        combined = torch.cat(outputs, dim=2)  # (N, K, num_heads * dim_out)
+        y = self.proj_down(combined) # (N, K, M)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -435,7 +484,8 @@ class LayerNormalization(nn.Module):
         # shift initializations with nn.Parameter                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.gamma = nn.Parameter(torch.zeros(emb_dim)) # (emb_dim,)
+        self.beta = nn.Parameter(torch.ones(emb_dim))  # (emb_dim,)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -462,7 +512,13 @@ class LayerNormalization(nn.Module):
         # the standard deviation.                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        M = x.shape[-1]
+        mean = torch.sum(x, dim=-1) / M
+        mean.unsqueeze_(-1) # (N, K, 1)
+        var = torch.sum((x - mean) ** 2, dim=-1) / M
+        var.unsqueeze_(-1) # (N, K, 1)
+        x_hat = (x - mean) / (var + self.epsilon) ** 0.5
+        y = self.gamma * x_hat + self.beta 
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -500,7 +556,11 @@ class FeedForwardBlock(nn.Module):
         # change?                                                                #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        c = (6 / (inp_dim + hidden_dim_feedforward)) ** 0.5
+        self.proj_up = nn.Linear(inp_dim, hidden_dim_feedforward)
+        nn.init.uniform_(self.proj_up.weight, -c, c)
+        self.proj_down = nn.Linear(hidden_dim_feedforward, inp_dim)
+        nn.init.uniform_(self.proj_down.weight, -c, c)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -522,7 +582,9 @@ class FeedForwardBlock(nn.Module):
         # no activation after the second MLP                                      #
         ###########################################################################
         # Replace "pass" statement with your code
-        pass
+        Z = self.proj_up(x) # (N, K, F)
+        A = torch.relu(Z)
+        y = self.proj_down(A) # (N, K, M)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -597,7 +659,12 @@ class EncoderBlock(nn.Module):
         # 4. A Dropout layer with given dropout parameter                        #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        head_dim = emb_dim // num_heads
+        self.MHA = MultiHeadAttention(num_heads, emb_dim, head_dim)
+        self.LayerNorm1 = LayerNormalization(emb_dim)
+        self.LayerNorm2 = LayerNormalization(emb_dim)
+        self.FFN = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.dropout = nn.Dropout(dropout)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -622,7 +689,12 @@ class EncoderBlock(nn.Module):
         # reference from the architecture written in the fucntion documentation. #
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        attn = self.MHA(x, x, x)
+        residual1 = x + attn
+        Z = self.dropout(self.LayerNorm1(residual1))
+        b = self.FFN(Z)
+        residual2 = Z + b
+        y = self.dropout(self.LayerNorm2(residual2))
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -655,7 +727,11 @@ def get_subsequent_mask(seq):
     #                                                                             #
     ###############################################################################
     # Replace "pass" statement with your code
-    pass
+    N, K = seq.shape
+    mask = torch.zeros((N, K, K), device=seq.device, dtype=torch.bool) # (N, K, K)
+    positions = torch.arange(K, device=seq.device)  # (K,)
+    for i in range(K):
+        mask[:, i, :] = positions > i
     ##############################################################################
     #               END OF YOUR CODE                                             #
     ##############################################################################
@@ -741,7 +817,14 @@ class DecoderBlock(nn.Module):
         ##########################################################################
 
         # Replace "pass" statement with your code
-        pass
+        head_dim = emb_dim // num_heads
+        self.attention_self = MultiHeadAttention(num_heads, emb_dim, head_dim)
+        self.attention_cross = MultiHeadAttention(num_heads, emb_dim, head_dim)
+        self.feed_forward = FeedForwardBlock(emb_dim, feedforward_dim)
+        self.norm1 = LayerNormalization(emb_dim)
+        self.norm2 = LayerNormalization(emb_dim)
+        self.norm3 = LayerNormalization(emb_dim)
+        self.dropout = nn.Dropout(dropout)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
@@ -771,7 +854,17 @@ class DecoderBlock(nn.Module):
         # pass. Don't forget to apply the residual connections for different layers.
         ##########################################################################
         # Replace "pass" statement with your code
-        pass
+        A = self.attention_self(dec_inp, dec_inp, dec_inp, mask) # (N, K, M)
+        r1 = A + dec_inp
+        Z = self.dropout(self.norm1(r1)) # (N, K, M)
+
+        B = self.attention_cross(Z, enc_inp, enc_inp)
+        r2 = Z + B
+        U = self.dropout(self.norm2(r2)) # (N, K, M)
+
+        C = self.feed_forward(U)
+        r3 = C + U
+        y = self.dropout(self.norm3(r3)) # (N, K, M)
         ##########################################################################
         #               END OF YOUR CODE                                         #
         ##########################################################################
