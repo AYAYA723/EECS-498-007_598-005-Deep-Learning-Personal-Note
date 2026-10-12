@@ -1018,6 +1018,21 @@ def position_encoding_sinusoid(K: int, M: int) -> Tensor:
     return y
 
 
+def position_encoding_sinusoid_multiscale(K: int, M: int) -> Tensor:
+    """Multi-frequency encoding for training, without changing legacy fixtures.
+
+    The original assignment's sinusoid test uses a floored exponent; the
+    standard Transformer instead uses 2*i/M and a different frequency per pair.
+    """
+    positions = torch.arange(K, dtype=torch.float32).view(K, 1)
+    frequencies = 10000.0 ** (-torch.arange(0, M, 2, dtype=torch.float32) / M)
+    angles = positions * frequencies
+    y = torch.empty(K, M, dtype=torch.float32)
+    y[:, 0::2] = torch.sin(angles)
+    y[:, 1::2] = torch.cos(angles[:, : M // 2])
+    return y.unsqueeze(0)
+
+
 class Transformer(nn.Module):
     def __init__(
         self,

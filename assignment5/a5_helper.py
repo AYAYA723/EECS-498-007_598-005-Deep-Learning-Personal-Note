@@ -160,8 +160,10 @@ def train(
     warmup_interval=1000,
     lr=6e-4,
     device=torch.device("cpu"),
+    restore_best=False,
 ):
     print("Training started...")
+    model = model.to(device)
     if warmup_interval is None:
         optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=(0.9, 0.995), eps=1e-9
@@ -171,12 +173,15 @@ def train(
             model.parameters(), lr=warmup_lr, betas=(0.9, 0.995), eps=1e-9
         )
     iteration = 0
+    best_score = None
+    best_state = None
+    best_epoch = None
     for epoch_num in range(num_epochs):
-        epoch_loss = []
+        epoch_loss = 0.0
+        num_tokens = 0
         model.train()
         for it in train_dataloader:
             inp, inp_pos, out, out_pos = it
-            model = model.to(device)
             inp_pos = inp_pos.to(device)
             out_pos = out_pos.to(device)
             out = out.to(device)
@@ -186,7 +191,8 @@ def train(
 
             pred = model(inp.long(), inp_pos, out.long(), out_pos)
             loss = loss_func(pred, gnd)
-            epoch_loss.append(loss.item())
+            epoch_loss += loss.item()
+            num_tokens += gnd.numel()
             if warmup_interval is not None and iteration == warmup_interval:
                 print(
                     f"End of warmup. Swapping learning rates from {warmup_lr} to {lr}"
@@ -198,9 +204,20 @@ def train(
             loss.backward()
             optimizer.step()
             iteration = iteration + 1
-        avg_epoch_loss = sum(epoch_loss) / len(epoch_loss)
-        val_loss, val_acc = val(model, val_dataloader, loss_func, batch_size)
-        loss_hist = avg_epoch_loss / (batch_size * 4)
+        if num_tokens == 0:
+            raise ValueError("The training dataloader is empty.")
+        val_loss, val_acc = val(
+            model, val_dataloader, loss_func, batch_size, device=device
+        )
+        score = (val_acc, -val_loss)
+        if restore_best and (best_score is None or score > best_score):
+            best_score = score
+            best_epoch = epoch_num + 1
+            best_state = {
+                name: value.detach().cpu().clone()
+                for name, value in model.state_dict().items()
+            }
+        loss_hist = epoch_loss / num_tokens
         print(
             f"[epoch: {epoch_num+1}]",
             "[loss: ",
@@ -209,20 +226,28 @@ def train(
             "val_loss: [val_loss ",
             f"{val_loss:.4f}",
             "]",
+            f"[val_acc: {val_acc:.4f}]",
         )
 
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        print(
+            f"Restored best validation checkpoint: epoch {best_epoch}, "
+            f"accuracy {best_score[0]:.4f}"
+        )
     return model
 
 
+@torch.no_grad()
 def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
     model.eval()
-    epoch_loss = []
+    model = model.to(device)
+    epoch_loss = 0.0
     num_correct = 0
     total = 0
     for it in dataloader:
         inp, inp_pos, out, out_pos = it
 
-        model = model.to(device)
         inp_pos = inp_pos.to(device)
         out_pos = out_pos.to(device)
         out = out.to(device)
@@ -239,15 +264,26 @@ def val(model, dataloader, loss_func, batch_size, device=torch.device("cpu")):
         num_correct = num_correct + n_correct
 
         total = total + len(pred_max)
-        epoch_loss.append(loss.item())
+        epoch_loss += loss.item()
 
-    avg_epoch_loss = sum(epoch_loss) / len(epoch_loss)
-    return avg_epoch_loss / (batch_size * 4), n_correct / total
+    if total == 0:
+        raise ValueError("The validation dataloader is empty.")
+    return epoch_loss / total, num_correct / total
 
 
-def inference(model, inp_exp, inp_exp_pos, out_pos_exp, out_seq_len):
+@torch.no_grad()
+def inference(
+    model, inp_exp, inp_exp_pos, out_pos_exp, out_seq_len,
+    bos_token=14, eos_token=15,
+):
+    from transformers import get_subsequent_mask
+
     model.eval()
-    y_init = torch.LongTensor([14]).unsqueeze(0).cuda().view(1, 1)
+    device = next(model.parameters()).device
+    inp_exp = inp_exp.reshape(1, -1).to(device=device, dtype=torch.long)
+    inp_exp_pos = inp_exp_pos.to(device)
+    out_pos_exp = out_pos_exp.to(device)
+    y_init = torch.full((1, 1), bos_token, dtype=torch.long, device=device)
 
     ques_emb = model.emb_layer(inp_exp)
     q_emb_inp = ques_emb + inp_exp_pos
@@ -255,12 +291,15 @@ def inference(model, inp_exp, inp_exp_pos, out_pos_exp, out_seq_len):
     for i in range(out_seq_len - 1):
         ans_emb = model.emb_layer(y_init)
         a_emb_inp = ans_emb + out_pos_exp[:, : y_init.shape[1], :]
-        dec_out = model.decoder(a_emb_inp, enc_out, None)
+        mask = get_subsequent_mask(y_init)
+        dec_out = model.decoder(a_emb_inp, enc_out, mask)
         _, next_word = torch.max(
             dec_out[0, y_init.shape[1] - 1 : y_init.shape[1]], dim=1
         )
 
         y_init = torch.cat([y_init, next_word.view(1, 1)], dim=1)
+        if next_word.item() == eos_token:
+            break
     return y_init, model
 
 
