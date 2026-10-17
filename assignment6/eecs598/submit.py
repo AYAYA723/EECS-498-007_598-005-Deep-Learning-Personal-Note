@@ -45,6 +45,7 @@ _A5_FILES = [
 ]
 
 _A6_FILES = [
+    "a6_runtime.py",
     "vae.py",
     "variational_autoencoders.ipynb",
     "gan.py",

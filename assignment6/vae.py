@@ -126,16 +126,32 @@ class CVAE(nn.Module):
         # Replace "pass" statement with your code
         self.hidden_dim = 400
         self.encoder = nn.Sequential(
-          
+          nn.Linear(input_size + self.num_classes, self.hidden_dim),
+          nn.ReLU(),
+          nn.Linear(self.hidden_dim, self.hidden_dim),
+          nn.ReLU(),
+          nn.Linear(self.hidden_dim, self.hidden_dim),
+          nn.ReLU() # (N, H_d)
         )
-
+        self.mu_layer = nn.Linear(self.hidden_dim, self.latent_size)
+        self.logvar_layer = nn.Linear(self.hidden_dim, self.latent_size)
         ###########################################################################
         # TODO: Define a fully-connected decoder as described in the notebook that#
         # transforms the latent space (N, Z + C) to the estimated images of shape #
         # (N, 1, H, W).                                                           #
         ###########################################################################
         # Replace "pass" statement with your code
-        pass
+        self.decoder = nn.Sequential(
+          nn.Linear(self.latent_size + self.num_classes, self.hidden_dim),
+          nn.ReLU(),
+          nn.Linear(self.hidden_dim, self.hidden_dim),
+          nn.ReLU(),
+          nn.Linear(self.hidden_dim, self.hidden_dim),
+          nn.ReLU(),
+          nn.Linear(self.hidden_dim, input_size),
+          nn.Sigmoid(),
+          nn.Unflatten(dim=1, unflattened_size=(1, 28, 28))
+        )
         ###########################################################################
         #                                      END OF YOUR CODE                   #
         ###########################################################################
@@ -168,7 +184,14 @@ class CVAE(nn.Module):
         #     resconstruct x                                                      #
         ###########################################################################
         # Replace "pass" statement with your code
-        pass
+        x_flat = torch.flatten(x, start_dim=1) # (N, HW)
+        x_cat = torch.cat((x_flat, c), dim=1) # (N, HW+C)
+        hidden_features = self.encoder(x_cat)
+        mu = self.mu_layer(hidden_features) # (N, Z)
+        logvar = self.logvar_layer(hidden_features)  # (N, Z)
+        z = reparametrize(mu, logvar)
+        z_cat = torch.cat((z, c), dim=1) 
+        x_hat = self.decoder(z_cat)
         ###########################################################################
         #                                      END OF YOUR CODE                   #
         ###########################################################################

@@ -12,7 +12,7 @@ import torch
 import torch.optim as optim
 import torchvision.datasets as dset
 import torchvision.transforms as T
-from scipy.ndimage.filters import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d
 from torch import nn
 from torch.utils.data import DataLoader, sampler
 
@@ -337,10 +337,13 @@ def train_vae(epoch, model, train_loader, cond=False):
     num_classes = 10
     loss = None
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    model_parameter = next(model.parameters())
     for batch_idx, (data, labels) in enumerate(train_loader):
-        data = data.to(device="cuda:0")
+        data = data.to(device=model_parameter.device, dtype=model_parameter.dtype)
         if cond:
-            one_hot_vec = one_hot(labels, num_classes).to(device="cuda")
+            one_hot_vec = one_hot(labels, num_classes).to(
+                device=model_parameter.device, dtype=model_parameter.dtype
+            )
             recon_batch, mu, logvar = model(data, one_hot_vec)
         else:
             recon_batch, mu, logvar = model(data)
